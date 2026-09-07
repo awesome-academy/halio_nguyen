@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sun_booking_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sun_booking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sun_booking_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-sun_booking_tours}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - sun_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sun_booking} -d ${POSTGRES_DB:-sun_booking_tours}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sun_booking_network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: sun_booking_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@sunbooking.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sun_booking_network
+
+volumes:
+  sun_postgres_data:
+    name: sun_postgres_data
+
+networks:
+  sun_booking_network:
+    name: sun_booking_network
+    driver: bridge

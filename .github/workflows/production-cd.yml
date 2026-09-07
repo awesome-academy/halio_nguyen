@@ -1,0 +1,169 @@
+name: Production CI/CD - Release & Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # 1. Pre-Deployment Quality Gate
+  # ----------------------------------------------------------------------------
+  quality-gate:
+    name: Production Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Run Backend Tests
+        run: |
+          cd apps/api
+          go test -v -race ./...
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Verify Frontend Lint & Build
+        run: |
+          cd apps/web
+          pnpm install --frozen-lockfile
+          pnpm run lint
+          pnpm run build
+
+  # ----------------------------------------------------------------------------
+  # 2. Build & Push Backend Docker Image
+  # ----------------------------------------------------------------------------
+  build-and-push-api:
+    name: Build & Push Backend Image
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata for API
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/api
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+            type=ref,event=branch
+
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/api
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ----------------------------------------------------------------------------
+  # 3. Build & Push Frontend Docker Image
+  # ----------------------------------------------------------------------------
+  build-and-push-web:
+    name: Build & Push Frontend Image
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata for Web
+        id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/web
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+            type=ref,event=branch
+
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/web
+          file: ./apps/web/Dockerfile
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ----------------------------------------------------------------------------
+  # 4. Production Deployment
+  # ----------------------------------------------------------------------------
+  deploy-production:
+    name: Deploy to Production Environment
+    needs: [build-and-push-api, build-and-push-web]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://sunbooking.com
+
+    steps:
+      - name: Announce Deployment Start
+        run: |
+          echo "🚀 Deploying SUN Booking Tours to production environment..."
+          echo "Backend Image: ghcr.io/${{ github.repository }}/api:${{ github.sha }}"
+          echo "Frontend Image: ghcr.io/${{ github.repository }}/web:${{ github.sha }}"
+
+      # Example deployment step:
+      # - name: Deploy via SSH / Kubernetes / Webhook
+      #   uses: appleboy/ssh-action@master
+      #   with:
+      #     host: ${{ secrets.PROD_SERVER_HOST }}
+      #     username: ${{ secrets.PROD_SERVER_USER }}
+      #     key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+      #     script: |
+      #       cd /opt/sun-booking-tours
+      #       docker compose pull
+      #       docker compose up -d
