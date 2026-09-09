@@ -55,8 +55,17 @@ func main() {
 	e.Use(middleware.RequestID())
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
+
+	// localhost:3000 is a dev-only convenience for running the Next.js app
+	// without the rewrites proxy in front of it; a production CORS list must
+	// not carry it (red-team finding: an attacker-hosted localhost page would
+	// otherwise be CORS-permitted against the live API in every environment).
+	allowOrigins := []string{cfg.App.AllowedOrigins}
+	if cfg.App.Env == "development" {
+		allowOrigins = append(allowOrigins, "http://localhost:3000")
+	}
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{cfg.App.AllowedOrigins, "http://localhost:3000"},
+		AllowOrigins: allowOrigins,
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))

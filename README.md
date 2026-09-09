@@ -37,10 +37,14 @@ sun-booking-tours/
 │   ├── api/                           # Backend API (Golang + Echo Framework)
 │   │   ├── cmd/server/main.go         # HTTP Server Entry Point & Graceful Shutdown
 │   │   ├── internal/
+│   │   │   ├── apperror/              # Typed errors & the one JSON error contract (echo.HTTPErrorHandler)
 │   │   │   ├── config/                # Environment configuration & unit tests
 │   │   │   │   ├── config.go
 │   │   │   │   └── config_test.go
 │   │   │   ├── db/postgres.go         # PostgreSQL connection pool (pgx/v5)
+│   │   │   ├── repository/            # ListParams/Paginated[T]/ResolveSort — shared query-building base
+│   │   │   ├── router/                # Route registry (router.New) — each feature adds one RegisterRoutes(admin) line
+│   │   │   ├── service/                # Shared service-layer helpers (empty by default; grows per feature)
 │   │   │   └── domain/                # Entity structs & unit tests
 │   │   │       ├── user.go
 │   │   │       ├── user_test.go
