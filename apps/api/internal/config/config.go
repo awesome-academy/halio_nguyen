@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -56,9 +57,27 @@ type JWTConfig struct {
 	RefreshExpiryDays time.Duration
 }
 
-// SecurityConfig holds encryption keys and provider secrets.
+// SecurityConfig holds encryption keys, provider secrets, and the
+// admin-portal hardening knobs: cookie security, login-attempt throttling,
+// and the proxy hops trusted to set X-Forwarded-For.
 type SecurityConfig struct {
 	BankEncryptionKey string
+
+	// CookieSecure controls the Secure flag on the sun_admin_token cookie.
+	// It defaults to true whenever APP_ENV != "development" so a missing env
+	// var fails safe (secure) rather than open; COOKIE_SECURE overrides it
+	// explicitly in either direction.
+	CookieSecure bool
+
+	// LoginRateLimitPerMinute and LoginRateLimitBurst bound the in-memory
+	// per-IP/email login throttle (decisions.md D3).
+	LoginRateLimitPerMinute int
+	LoginRateLimitBurst     int
+
+	// TrustedProxyCIDRs lists the proxy hops trusted to set
+	// X-Forwarded-For; anything beyond these hops is not trusted for
+	// per-IP rate limiting.
+	TrustedProxyCIDRs []string
 }
 
 // Load reads configuration from environment variables and optional .env file.
@@ -66,13 +85,19 @@ func Load() (*Config, error) {
 	// Try loading from .env if present, ignore if missing
 	_ = godotenv.Load()
 
-	accessHours := getEnvInt("JWT_ACCESS_EXPIRY_HOURS", 24)
+	// D2 (decisions.md): admin-portal JWT lifetime is 1h, not the
+	// spec's original 24h default — there is no refresh-token table, so a
+	// short expiry is the only way to bound a leaked token's usable life.
+	accessHours := getEnvInt("JWT_ACCESS_EXPIRY_HOURS", 1)
 	refreshDays := getEnvInt("JWT_REFRESH_EXPIRY_DAYS", 7)
+
+	appEnv := getEnv("APP_ENV", "development")
+	cookieSecureDefault := appEnv != "development"
 
 	cfg := &Config{
 		App: AppConfig{
 			Name:           getEnv("APP_NAME", "sun-booking-tours-api"),
-			Env:            getEnv("APP_ENV", "development"),
+			Env:            appEnv,
 			Port:           getEnv("APP_PORT", "8080"),
 			BaseURL:        getEnv("API_BASE_URL", "http://localhost:8080"),
 			FrontendURL:    getEnv("NEXT_PUBLIC_SITE_URL", "http://localhost:3000"),
@@ -93,7 +118,11 @@ func Load() (*Config, error) {
 			RefreshExpiryDays: time.Duration(refreshDays) * 24 * time.Hour,
 		},
 		Security: SecurityConfig{
-			BankEncryptionKey: getEnv("BANK_ENCRYPTION_KEY", "my-super-secret-encryption-key32b"),
+			BankEncryptionKey:       getEnv("BANK_ENCRYPTION_KEY", "my-super-secret-encryption-key32b"),
+			CookieSecure:            getEnvBool("COOKIE_SECURE", cookieSecureDefault),
+			LoginRateLimitPerMinute: getEnvInt("LOGIN_RATE_LIMIT_PER_MINUTE", 5),
+			LoginRateLimitBurst:     getEnvInt("LOGIN_RATE_LIMIT_BURST", 5),
+			TrustedProxyCIDRs:       getEnvList("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128"),
 		},
 	}
 
@@ -117,4 +146,34 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return val
+}
+
+// getEnvBool reads a boolean env var, falling back to fallback when the var
+// is unset, empty, or not a valid bool — so a malformed value fails safe to
+// the caller-supplied default rather than silently becoming false.
+func getEnvBool(key string, fallback bool) bool {
+	valStr := os.Getenv(key)
+	if valStr == "" {
+		return fallback
+	}
+	val, err := strconv.ParseBool(valStr)
+	if err != nil {
+		return fallback
+	}
+	return val
+}
+
+// getEnvList reads a comma-separated env var into a trimmed, non-empty
+// string slice, falling back to a comma-separated default when unset.
+func getEnvList(key, fallback string) []string {
+	raw := getEnv(key, fallback)
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }

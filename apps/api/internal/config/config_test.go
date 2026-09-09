@@ -13,6 +13,8 @@ func TestConfigDefaults(t *testing.T) {
 		"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER",
 		"POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_SSLMODE",
 		"DATABASE_URL", "JWT_ACCESS_EXPIRY_HOURS", "JWT_REFRESH_EXPIRY_DAYS",
+		"COOKIE_SECURE", "LOGIN_RATE_LIMIT_PER_MINUTE", "LOGIN_RATE_LIMIT_BURST",
+		"TRUSTED_PROXY_CIDRS",
 	}
 	for _, v := range vars {
 		os.Unsetenv(v)
@@ -35,8 +37,70 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.Database.Port != "5434" {
 		t.Errorf("expected default DB Port '5434', got '%s'", cfg.Database.Port)
 	}
-	if cfg.JWT.AccessExpiryHours != 24*time.Hour {
-		t.Errorf("expected 24h JWT access expiry, got %v", cfg.JWT.AccessExpiryHours)
+	// D2: admin-portal override — 1h, not the spec's original 24h default.
+	if cfg.JWT.AccessExpiryHours != 1*time.Hour {
+		t.Errorf("expected 1h JWT access expiry (decisions.md D2), got %v", cfg.JWT.AccessExpiryHours)
+	}
+}
+
+func TestSecurityConfigDefaults(t *testing.T) {
+	vars := []string{"APP_ENV", "COOKIE_SECURE", "LOGIN_RATE_LIMIT_PER_MINUTE", "LOGIN_RATE_LIMIT_BURST", "TRUSTED_PROXY_CIDRS"}
+	for _, v := range vars {
+		os.Unsetenv(v)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected no error loading config, got: %v", err)
+	}
+
+	// APP_ENV unset -> defaults to "development" -> cookies not forced secure.
+	if cfg.Security.CookieSecure != false {
+		t.Errorf("expected CookieSecure=false in development, got %v", cfg.Security.CookieSecure)
+	}
+	if cfg.Security.LoginRateLimitPerMinute != 5 {
+		t.Errorf("expected LoginRateLimitPerMinute=5, got %d", cfg.Security.LoginRateLimitPerMinute)
+	}
+	if cfg.Security.LoginRateLimitBurst != 5 {
+		t.Errorf("expected LoginRateLimitBurst=5, got %d", cfg.Security.LoginRateLimitBurst)
+	}
+	wantCIDRs := []string{"127.0.0.1/32", "::1/128"}
+	if len(cfg.Security.TrustedProxyCIDRs) != len(wantCIDRs) {
+		t.Fatalf("expected %d trusted proxy CIDRs, got %d (%v)", len(wantCIDRs), len(cfg.Security.TrustedProxyCIDRs), cfg.Security.TrustedProxyCIDRs)
+	}
+	for i, want := range wantCIDRs {
+		if cfg.Security.TrustedProxyCIDRs[i] != want {
+			t.Errorf("TrustedProxyCIDRs[%d] = %q, want %q", i, cfg.Security.TrustedProxyCIDRs[i], want)
+		}
+	}
+}
+
+func TestCookieSecureFailsSafeOutsideDevelopment(t *testing.T) {
+	os.Setenv("APP_ENV", "production")
+	os.Unsetenv("COOKIE_SECURE")
+	defer os.Unsetenv("APP_ENV")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected no error loading config, got: %v", err)
+	}
+	if !cfg.Security.CookieSecure {
+		t.Error("expected CookieSecure=true when APP_ENV != development and COOKIE_SECURE unset")
+	}
+}
+
+func TestCookieSecureExplicitOverride(t *testing.T) {
+	os.Setenv("APP_ENV", "production")
+	os.Setenv("COOKIE_SECURE", "false")
+	defer os.Unsetenv("APP_ENV")
+	defer os.Unsetenv("COOKIE_SECURE")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected no error loading config, got: %v", err)
+	}
+	if cfg.Security.CookieSecure {
+		t.Error("expected explicit COOKIE_SECURE=false to override the production default")
 	}
 }
 

@@ -12,8 +12,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/sun-booking/sun-booking-tours/apps/api/internal/apperror"
 	"github.com/sun-booking/sun-booking-tours/apps/api/internal/config"
 	"github.com/sun-booking/sun-booking-tours/apps/api/internal/db"
+	"github.com/sun-booking/sun-booking-tours/apps/api/internal/router"
 )
 
 func main() {
@@ -42,6 +44,12 @@ func main() {
 
 	e := echo.New()
 	e.HideBanner = true
+	e.HTTPErrorHandler = apperror.Handler
+
+	// Trust XFF only from loopback/private-network hops (the Next.js proxy)
+	// so a per-IP throttle (Phase 2) sees the real client, not a spoofed
+	// header from the public internet.
+	e.IPExtractor = echo.ExtractIPFromXFFHeader(echo.TrustLoopback(true), echo.TrustPrivateNet(true))
 
 	// Middlewares
 	e.Use(middleware.RequestID())
@@ -73,14 +81,9 @@ func main() {
 		})
 	})
 
-	// API v1 routes group placeholder
-	v1 := e.Group("/api/v1")
-	v1.GET("/info", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{
-			"version": "1.0.0",
-			"service": "SUN Booking Tours API",
-		})
-	})
+	// Route registry: main.go is frozen after this — every later phase adds
+	// its routes inside internal/router, not here.
+	router.New(e, cfg, router.Deps{})
 
 	// Graceful shutdown server
 	go func() {
