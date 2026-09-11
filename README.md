@@ -83,9 +83,14 @@ sun-booking-tours/
 │       │   │   │       ├── dashboard/ # Executive Dashboard (KPIs, Recent Bookings)
 │       │   │   │       └── revenue/   # Batch Revenue Visualizer (Materialized Views)
 │       │   │   ├── globals.css        # Sun Orange theme variables
-│       │   │   └── layout.tsx         # Root HTML/Body layout with base metadata
-│       │   ├── components/            # UI primitives, Customer & Admin components
-│       │   ├── lib/                   # Utility helpers, formatters (VND currency, dates)
+│       │   │   ├── layout.tsx         # Root HTML/Body layout with base metadata, wraps <Providers>
+│       │   │   └── providers.tsx      # TanStack Query client provider (admin data fetching)
+│       │   ├── components/
+│       │   │   ├── ui/                # shadcn/ui primitives (button, dialog, table, form, switch, calendar, ...)
+│       │   │   └── admin/             # Admin components (data table, dialogs — grows per admin portal phase)
+│       │   ├── lib/
+│       │   │   ├── api/               # apiFetch<T> client, ApiError contract, query-key factories
+│       │   │   └── utils.ts           # Formatters (VND currency, dates), cn()
 │       │   ├── middleware.ts          # RBAC Route Guard protecting /admin/* and /user/*
 │       │   └── types/                 # TypeScript interfaces mirroring Go backend models
 │       ├── Dockerfile                 # Multi-stage Next.js Standalone production image
@@ -94,7 +99,7 @@ sun-booking-tours/
 │       ├── package.json
 │       ├── tsconfig.json
 │       ├── tailwind.config.ts
-│       └── next.config.mjs
+│       └── next.config.mjs            # Rewrites /api/v1/* to the Go API (keeps the admin cookie same-origin)
 │
 ├── docker/
 │   ├── docker-compose.yml             # PostgreSQL 16 + pgAdmin 4 services
@@ -237,6 +242,14 @@ Located at `apps/web/src/app/(admin)/admin`:
 - **Executive Dashboard (`admin/dashboard/page.tsx`)**: Key performance metrics (Net Revenue MTD, Total Bookings, Active Tours, Review Ratings) and recent booking requests queue.
 - **Revenue Analytics Visualizer (`admin/revenue/page.tsx`)**: Daily and monthly breakdowns powered by PostgreSQL Materialized Views, with CSV export and manual **Trigger Batch Refresh** button.
 
+> **Status:** the pages above are the original UI shell with mock data. A full admin API + UI
+> build (auth, categories, tours, bookings, users, review moderation, real revenue data) is under
+> active development — see [`plans/260908-0912-admin-portal-full-stack/plan.md`](plans/260908-0912-admin-portal-full-stack/plan.md)
+> for the phased build and [`decisions.md`](plans/260908-0912-admin-portal-full-stack/decisions.md)
+> for the architecture/security decisions behind it. Phase 1 (shared backend/frontend foundation —
+> error handling, repository pattern, router, shadcn/ui, same-origin API proxy) is complete; login
+> and the feature CRUD screens land in the phases that follow.
+
 ### 4.3. RBAC Route Guard Middleware
 `apps/web/src/middleware.ts` enforces Role-Based Access Control:
 - Intercepts `/admin/*` routes and checks for valid admin credentials (redirects unauthenticated visitors to `/admin/login`).
@@ -334,6 +347,10 @@ cp .env.example .env
 | `PGADMIN_PORT` | `5050` | pgAdmin Web UI host port |
 | `PGADMIN_EMAIL` | `admin@sunbooking.com` | pgAdmin login email |
 | `JWT_SECRET` | `super-secret-jwt-key-...` | Secret key used for signing authentication tokens |
+| `JWT_ACCESS_EXPIRY_HOURS` | `1` | Admin session token lifetime (short by design — stateless JWTs can't be revoked server-side) |
+| `COOKIE_SECURE` | `false` (dev) | Whether the admin session cookie requires HTTPS; derived from `APP_ENV`, overridable |
+| `LOGIN_RATE_LIMIT_PER_MINUTE` / `_BURST` | `5` / `5` | In-memory per-IP+email throttle on admin login attempts |
+| `TRUSTED_PROXY_CIDRS` | `127.0.0.1/32,::1/128` | Loopback/private ranges trusted to set `X-Forwarded-For` (the Next.js proxy hop) |
 | `BANK_ENCRYPTION_KEY` | `my-super-secret-key-32b` | AES-256 secret key for encrypting user bank account numbers |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | `...` | Google OAuth 2.0 credentials |
 | `FACEBOOK_CLIENT_ID` / `_SECRET` | `...` | Facebook OAuth credentials |

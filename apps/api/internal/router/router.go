@@ -6,26 +6,48 @@ package router
 import (
 	"net/http"
 
+	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
+	"github.com/sun-booking/sun-booking-tours/apps/api/internal/apperror"
 	"github.com/sun-booking/sun-booking-tours/apps/api/internal/config"
+	"github.com/sun-booking/sun-booking-tours/apps/api/internal/handler"
+	adminmw "github.com/sun-booking/sun-booking-tours/apps/api/internal/middleware"
 )
 
-// Deps carries the shared dependencies route groups need (repositories,
-// services, middleware). It is empty in this phase; later phases add fields
-// as their handlers require them.
-type Deps struct{}
+// Deps carries the shared dependencies route groups need. Each later phase
+// adds the fields its own handlers require.
+type Deps struct {
+	AuthHandler *handler.AuthHandler
+	Categories  *handler.CategoryHandler
+}
 
 // New wires the API's /api/v1 route group onto e. It preserves the existing
-// /api/v1/info route and creates the /api/v1/admin group every admin-portal
-// feature registers against. The admin group's middleware chain (JWT auth +
-// RBAC) is empty here and filled in by Phase 2.
+// /api/v1/info route and builds the /api/v1/admin group's A0 gate — echojwt
+// (cookie sun_admin_token) then RequireAdminRole — every admin-portal
+// feature registers against. login/logout are registered on the sibling
+// ungated group instead (they run before any session exists).
 func New(e *echo.Echo, cfg *config.Config, deps Deps) {
 	v1 := e.Group("/api/v1")
 	v1.GET("/info", infoHandler)
 
-	// admin is the group every admin-portal route sits behind. Later phases
-	// add their middleware chain and call xxxHandler.RegisterRoutes(admin).
-	v1.Group("/admin")
+	ungatedAdmin := v1.Group("/admin")
+	gatedAdmin := v1.Group("/admin")
+	gatedAdmin.Use(echojwt.WithConfig(adminmw.NewJWTConfig(cfg)))
+	gatedAdmin.Use(adminmw.RequireAdminRole)
+
+	// A wildcard fallback so the gate runs even for a not-yet-built admin
+	// route (FR-601's "before any handler or resource lookup" holds for the
+	// whole group, not just registered handlers). A later phase's more
+	// specific route on gatedAdmin always wins over this catch-all.
+	gatedAdmin.Any("/*", notFoundHandler)
+
+	if deps.AuthHandler != nil {
+		loginRateLimiter := adminmw.NewLoginRateLimiter(&cfg.Security)
+		deps.AuthHandler.RegisterRoutes(gatedAdmin, ungatedAdmin, loginRateLimiter)
+	}
+	if deps.Categories != nil {
+		deps.Categories.RegisterRoutes(gatedAdmin)
+	}
 }
 
 func infoHandler(c echo.Context) error {
@@ -33,4 +55,8 @@ func infoHandler(c echo.Context) error {
 		"version": "1.0.0",
 		"service": "SUN Booking Tours API",
 	})
+}
+
+func notFoundHandler(c echo.Context) error {
+	return apperror.NewNotFound("Not found")
 }

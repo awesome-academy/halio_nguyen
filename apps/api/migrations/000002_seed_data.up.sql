@@ -18,10 +18,15 @@ INSERT INTO categories (id, name, slug, description, sort_order) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- 3. Initial Users (Admin & Sample User)
--- Default password: Admin@123456 (bcrypt hash: $2a$10$w8gZ4.F3x1yN1g1B9T9aOeG0m9r2QeX1lY0b4L9h7M2s5P8t0R6uq)
+-- Default password: Admin@123456 (bcrypt cost-10 hash, verified against
+-- bcrypt.CompareHashAndPassword — see decisions.md D5). On a database where
+-- this file already ran, this INSERT no-ops (ON CONFLICT DO NOTHING); run
+-- scripts/fix_admin_seed_hash.sql instead to update an already-seeded row.
+-- The sample tourist account deliberately reuses the same dev-only hash;
+-- neither credential is meant to survive into a non-development database.
 INSERT INTO users (id, email, password_hash, full_name, phone, role) VALUES
-    ('33333333-3333-3333-3333-333333333001', 'admin@sunbooking.com', '$2a$10$w8gZ4.F3x1yN1g1B9T9aOeG0m9r2QeX1lY0b4L9h7M2s5P8t0R6uq', 'System Administrator', '0901234567', 'admin'),
-    ('33333333-3333-3333-3333-333333333002', 'tourist@sunbooking.com', '$2a$10$w8gZ4.F3x1yN1g1B9T9aOeG0m9r2QeX1lY0b4L9h7M2s5P8t0R6uq', 'John Tourist', '0987654321', 'user')
+    ('33333333-3333-3333-3333-333333333001', 'admin@sunbooking.com', '$2a$10$ZUWCjBrvW9sUo5dxwmSXGOro0PHNQXXzKTx/PfbtDD.W0czJfETGi', 'System Administrator', '0901234567', 'admin'),
+    ('33333333-3333-3333-3333-333333333002', 'tourist@sunbooking.com', '$2a$10$ZUWCjBrvW9sUo5dxwmSXGOro0PHNQXXzKTx/PfbtDD.W0czJfETGi', 'John Tourist', '0987654321', 'user')
 ON CONFLICT (email) DO NOTHING;
 
 -- 4. Sample Tours

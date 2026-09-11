@@ -35,3 +35,6 @@ Thumbs.db
 .gemini/
 skills-lock.json
 *.skill
+
+# Planning artifacts (local working notes, not part of the shipped repo)
+plans/

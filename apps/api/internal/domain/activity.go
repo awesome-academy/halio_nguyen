@@ -32,6 +32,10 @@ const (
 	EntityTypePayment = "payment"
 	EntityTypeComment = "comment"
 	EntityTypeRating  = "rating"
+	// EntityTypeUser is used by the login/logout activity rows (F001):
+	// entity_id is the acting admin's own user id. entity_type has no CHECK
+	// constraint, so this needs no migration.
+	EntityTypeUser = "user"
 )
 
 // ActivityLog represents an audit/activity event in the system.

@@ -15,6 +15,7 @@ import (
 	"github.com/sun-booking/sun-booking-tours/apps/api/internal/apperror"
 	"github.com/sun-booking/sun-booking-tours/apps/api/internal/config"
 	"github.com/sun-booking/sun-booking-tours/apps/api/internal/db"
+	adminmw "github.com/sun-booking/sun-booking-tours/apps/api/internal/middleware"
 	"github.com/sun-booking/sun-booking-tours/apps/api/internal/router"
 )
 
@@ -46,10 +47,15 @@ func main() {
 	e.HideBanner = true
 	e.HTTPErrorHandler = apperror.Handler
 
-	// Trust XFF only from loopback/private-network hops (the Next.js proxy)
-	// so a per-IP throttle (Phase 2) sees the real client, not a spoofed
-	// header from the public internet.
-	e.IPExtractor = echo.ExtractIPFromXFFHeader(echo.TrustLoopback(true), echo.TrustPrivateNet(true))
+	// Trust X-Forwarded-For only from the explicit TRUSTED_PROXY_CIDRS hops
+	// (the Next.js proxy) so the per-IP login throttle sees the real client
+	// and no other internal host can spoof it.
+	ipExtractor, err := adminmw.NewIPExtractor(cfg.Security.TrustedProxyCIDRs)
+	if err != nil {
+		logger.Error("invalid trusted proxy configuration", "error", err)
+		os.Exit(1)
+	}
+	e.IPExtractor = ipExtractor
 
 	// Middlewares
 	e.Use(middleware.RequestID())
@@ -90,9 +96,9 @@ func main() {
 		})
 	})
 
-	// Route registry: main.go is frozen after this — every later phase adds
-	// its routes inside internal/router, not here.
-	router.New(e, cfg, router.Deps{})
+	// Route registry: main.go is frozen after this — every later phase wires
+	// its chain in router.Build and its routes in router.New, not here.
+	router.New(e, cfg, router.Build(cfg, pool))
 
 	// Graceful shutdown server
 	go func() {

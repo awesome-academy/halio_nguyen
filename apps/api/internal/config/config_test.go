@@ -77,8 +77,10 @@ func TestSecurityConfigDefaults(t *testing.T) {
 
 func TestCookieSecureFailsSafeOutsideDevelopment(t *testing.T) {
 	os.Setenv("APP_ENV", "production")
+	os.Setenv("JWT_SECRET", "a-valid-32-plus-byte-secret-for-tests!!")
 	os.Unsetenv("COOKIE_SECURE")
 	defer os.Unsetenv("APP_ENV")
+	defer os.Unsetenv("JWT_SECRET")
 
 	cfg, err := Load()
 	if err != nil {
@@ -92,8 +94,10 @@ func TestCookieSecureFailsSafeOutsideDevelopment(t *testing.T) {
 func TestCookieSecureExplicitOverride(t *testing.T) {
 	os.Setenv("APP_ENV", "production")
 	os.Setenv("COOKIE_SECURE", "false")
+	os.Setenv("JWT_SECRET", "a-valid-32-plus-byte-secret-for-tests!!")
 	defer os.Unsetenv("APP_ENV")
 	defer os.Unsetenv("COOKIE_SECURE")
+	defer os.Unsetenv("JWT_SECRET")
 
 	cfg, err := Load()
 	if err != nil {
@@ -101,6 +105,40 @@ func TestCookieSecureExplicitOverride(t *testing.T) {
 	}
 	if cfg.Security.CookieSecure {
 		t.Error("expected explicit COOKIE_SECURE=false to override the production default")
+	}
+}
+
+func TestJWTSecretFailsClosedOutsideDevelopment(t *testing.T) {
+	os.Setenv("APP_ENV", "production")
+	os.Unsetenv("JWT_SECRET")
+	defer os.Unsetenv("APP_ENV")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected Load() to error when JWT_SECRET is unset outside development")
+	}
+}
+
+func TestJWTSecretTooShortFailsClosedOutsideDevelopment(t *testing.T) {
+	os.Setenv("APP_ENV", "production")
+	os.Setenv("JWT_SECRET", "too-short")
+	defer os.Unsetenv("APP_ENV")
+	defer os.Unsetenv("JWT_SECRET")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected Load() to error when JWT_SECRET is under 32 chars outside development")
+	}
+}
+
+func TestJWTSecretFallsBackInDevelopment(t *testing.T) {
+	os.Unsetenv("APP_ENV")
+	os.Unsetenv("JWT_SECRET")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected no error loading config in development, got: %v", err)
+	}
+	if len(cfg.JWT.Secret) < minJWTSecretLen {
+		t.Errorf("expected fallback secret to be at least %d chars, got %d", minJWTSecretLen, len(cfg.JWT.Secret))
 	}
 }
 
