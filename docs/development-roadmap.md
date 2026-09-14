@@ -11,7 +11,7 @@ local working notes; `plans/` is git-ignored). This page is the at-a-glance stat
 | 1 | Shared foundation (Go skeleton, error contract, shadcn, proxy, query client) | Completed | 2026-09-09 |
 | 2 | Admin authentication + RBAC gate (F001) | Completed | 2026-09-10 |
 | 3 | Tour category management + shared FE data-table library (F002) | Completed | 2026-09-11 |
-| 4 | Tour package backend (F003) | Pending | — |
+| 4 | Tour package backend (F003) | Completed | 2026-09-14 |
 | 5 | Tour package frontend (F003) | Pending | — |
 | 6 | Booking request management (F004) | Pending | — |
 | 7 | Platform user management (F005) | Pending | — |
@@ -19,7 +19,7 @@ local working notes; `plans/` is git-ignored). This page is the at-a-glance stat
 | 9 | Revenue analytics and dashboard (F007) | Pending | — |
 | 10 | Integration and hardening | Pending | — |
 
-**Progress:** 3 / 10 phases (≈ 22h of 74h estimated).
+**Progress:** 4 / 10 phases (≈ 32h of 74h estimated).
 
 ## Open items carried between phases
 

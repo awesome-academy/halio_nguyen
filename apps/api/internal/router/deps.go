@@ -23,10 +23,23 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) Deps {
 	emailThrottle := service.NewEmailThrottle(cfg.Security.LoginRateLimitPerMinute, emailThrottleWindow)
 	authService := service.NewAuthService(pool, userRepo, activityRepo, emailThrottle, cfg.JWT.Secret, cfg.JWT.AccessExpiryHours)
 
-	categoryService := service.NewCategoryService(pool, repository.NewCategoryRepository())
+	categoryRepo := repository.NewCategoryRepository()
+	categoryService := service.NewCategoryService(pool, categoryRepo)
+
+	tourRepo := repository.NewTourRepository()
+	tourImageRepo := repository.NewTourImageRepository()
+	tourScheduleRepo := repository.NewTourScheduleRepository()
+	bookingRepo := repository.NewBookingRepository()
+
+	tourService := service.NewTourService(pool, tourRepo, categoryRepo, tourImageRepo, tourScheduleRepo, bookingRepo)
+	tourImageService := service.NewTourImageService(pool, tourRepo, tourImageRepo)
+	tourScheduleService := service.NewTourScheduleService(pool, tourRepo, tourScheduleRepo, bookingRepo)
 
 	return Deps{
-		AuthHandler: handler.NewAuthHandler(authService, cfg),
-		Categories:  handler.NewCategoryHandler(categoryService),
+		AuthHandler:   handler.NewAuthHandler(authService, cfg),
+		Categories:    handler.NewCategoryHandler(categoryService),
+		Tours:         handler.NewTourHandler(tourService),
+		TourImages:    handler.NewTourImageHandler(tourImageService),
+		TourSchedules: handler.NewTourScheduleHandler(tourScheduleService),
 	}
 }

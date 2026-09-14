@@ -17,8 +17,11 @@ import (
 // Deps carries the shared dependencies route groups need. Each later phase
 // adds the fields its own handlers require.
 type Deps struct {
-	AuthHandler *handler.AuthHandler
-	Categories  *handler.CategoryHandler
+	AuthHandler   *handler.AuthHandler
+	Categories    *handler.CategoryHandler
+	Tours         *handler.TourHandler
+	TourImages    *handler.TourImageHandler
+	TourSchedules *handler.TourScheduleHandler
 }
 
 // New wires the API's /api/v1 route group onto e. It preserves the existing
@@ -47,6 +50,15 @@ func New(e *echo.Echo, cfg *config.Config, deps Deps) {
 	}
 	if deps.Categories != nil {
 		deps.Categories.RegisterRoutes(gatedAdmin)
+	}
+	if deps.Tours != nil {
+		deps.Tours.RegisterRoutes(gatedAdmin)
+	}
+	if deps.TourImages != nil {
+		deps.TourImages.RegisterRoutes(gatedAdmin)
+	}
+	if deps.TourSchedules != nil {
+		deps.TourSchedules.RegisterRoutes(gatedAdmin)
 	}
 }
 

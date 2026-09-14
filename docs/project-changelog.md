@@ -3,6 +3,35 @@
 Running record of significant changes. Newest first. Plan of record:
 `plans/260908-0912-admin-portal-full-stack/plan.md` (local working notes; `plans/` is git-ignored).
 
+## 2026-09-14 — Tour package backend (Phase 4, F003)
+
+**Added**
+- 13 admin routes across tours/images/schedules: `GET/POST /api/v1/admin/tours`,
+  `GET/PUT/PATCH .../:id[/status]`, `DELETE .../:id`; nested `POST/PUT/DELETE .../:id/images[/:imageId]`
+  and `.../:id/schedules[/:scheduleId][/status]`.
+- A3 create is one transaction across `tours` → `tour_images` → `tour_schedules`; any failure
+  (validation, BR-007 category check, a `23505` on either unique constraint) rolls back all three —
+  proven by a test that injects a failure on the last insert.
+- SM-001 (tour status: draft↔published↔archived) and SM-002 (schedule status: open↔closed,
+  →cancelled terminal) as explicit `map[string][]string` transition tables, each with a 422 on an
+  illegal transition.
+- D4's BR-012 delete guard on both tours (A6) and schedules (A13): row lock + active-booking count +
+  soft-delete inside one transaction, so a concurrent booking-create cannot slip between the count
+  and the write. Blocks with `409` naming the count; the functional spec's superseded "warn and
+  allow" draft was not implemented.
+- ALG-001 effective price (`schedule.price_override` → `tour.discount_price` → `tour.price`) as a
+  pure function, unit-tested independent of the database.
+- `BookingRepository` created here, minimal (`CountActiveByTour`/`CountActiveBySchedule` only) —
+  Phase 6 will extend the same file rather than duplicate the count logic.
+- Tour slug is always server-derived from the title (`FR-002`); unlike categories, F003 gives the
+  admin no client-side override.
+
+**Known limitations**
+- No live-database verification was possible on this build machine (no Docker/Postgres); every test
+  mocks the `repository.DB`/tx interfaces (D-A7). The phase's "13-action curl walkthrough" step was
+  skipped for the same reason.
+- `go test -race` cannot run here (no C toolchain) — plain `go test ./...` is the verified gate.
+
 ## 2026-09-11 — Tour category management + shared admin DataTable (Phase 3, F002)
 
 **Added**
