@@ -24,6 +24,7 @@ type Deps struct {
 	TourSchedules *handler.TourScheduleHandler
 	Bookings      *handler.BookingHandler
 	Users         *handler.UserAdminHandler
+	Reviews       *handler.ReviewAdminHandler
 }
 
 // New wires the API's /api/v1 route group onto e. It preserves the existing
@@ -67,6 +68,9 @@ func New(e *echo.Echo, cfg *config.Config, deps Deps) {
 	}
 	if deps.Users != nil {
 		deps.Users.RegisterRoutes(gatedAdmin)
+	}
+	if deps.Reviews != nil {
+		deps.Reviews.RegisterRoutes(gatedAdmin)
 	}
 }
 

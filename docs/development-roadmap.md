@@ -15,21 +15,23 @@ local working notes; `plans/` is git-ignored). This page is the at-a-glance stat
 | 5 | Tour package frontend (F003) | Completed | 2026-09-15 |
 | 6 | Booking request management (F004) | Completed | 2026-09-16 |
 | 7 | Platform user management (F005) | Completed | 2026-09-16 |
-| 8 | Review and comment moderation (F006) | Pending | — |
+| 8 | Review and comment moderation (F006) | Completed | 2026-09-16 |
 | 9 | Revenue analytics and dashboard (F007) | Pending | — |
 | 10 | Integration and hardening | Pending | — |
 
-**Progress:** 7 / 10 phases (≈ 57h of 74h estimated).
+**Progress:** 8 / 10 phases (≈ 64h of 74h estimated).
 
 ## Open items carried between phases
 
 - Apply `apps/api/scripts/fix_admin_seed_hash.sql` on any database seeded before 2026-09-10.
   (Applied to the local dev database on 2026-09-16; still outstanding for every other environment.)
 - R3: confirm `c.RealIP()` differs per client through the Next proxy (Phase 10).
-- CI has no Postgres (L5); repository SQL is mock-tested only. Phases 6 and 7 were additionally
+- CI has no Postgres (L5); repository SQL is mock-tested only. Phases 6, 7 and 8 were additionally
   verified by hand against a local Postgres — Phase 6 caught a NULL-scan defect the mocks could
-  not, and Phase 7 proved BR-002's `FOR UPDATE` race fix, which no mock can exercise. Worth
-  repeating for Phases 8–9 rather than trusting mocks alone.
+  not, Phase 7 proved BR-002's `FOR UPDATE` race fix, which no mock can exercise, and Phase 8 found
+  an ambiguous-column bug that made its detail endpoint 500 on **every** call while the whole mock
+  suite stayed green. Three phases, three defects only a real database surfaced: treat the live
+  pass as mandatory for Phase 9, not optional.
 - `go test -race` needs a C toolchain — unavailable on the current build machine.
 - L8: soft-deleted categories keep `name`/`slug` reserved (table-level UNIQUE, schema frozen).
 - Phase 6 / L1: `domain.UserBankAccount.AccountNumber` has no `json:"-"` tag, so any future query
@@ -49,6 +51,19 @@ local working notes; `plans/` is git-ignored). This page is the at-a-glance stat
   only when the target is an admin — as the plan specifies. Harmless at single-digit admin scale;
   if admin-mutation volume ever grows, pre-check the target row first and escalate to the full
   lock only when it is currently an active admin.
+- Phase 8 / L1: review and comment publish/hide/delete write no `activity_logs` row — same frozen
+  CHECK enum as Phase 7. Structured `slog` (actor id, action, review id, comment id) is the only
+  record that a moderation decision was made, and it is what an incident review would work from.
+- Phase 8 / L2: no restore for a soft-deleted review or comment. Accepted default, stated in the
+  confirm dialogs; recovery needs a manual `UPDATE ... SET deleted_at = NULL`.
+- Phase 8 / M1: A2 returns the whole comment tree unpaginated. Fine at current volume; a review
+  with a very large thread would ship it all in one response. Revisit in Phase 10.
+- Phase 8 / M2: A3 accepts `draft → published`, which the spec's state diagram frames as the
+  authoring flow ("out of scope"). Permitted by design — publishing is the only sensible action on
+  a draft row — but it is a product call worth confirming rather than an accident.
+- Phase 8 / note: browser-automation agents proved unreliable in this environment — two consecutive
+  runs reported results for actions that never reached the server (verified against the API access
+  log). Cross-check any browser-driven E2E claim against the access log or the database.
 - **Operational:** promote a second admin through `PATCH /api/v1/admin/users/{id} {"role":"admin"}`
   as the first real action after Phase 7 ships. Until then BR-002 has exactly one account to
   protect and RISK-001's manual-DB-operation scenario stays live.

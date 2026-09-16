@@ -3,6 +3,80 @@
 Running record of significant changes. Newest first. Plan of record:
 `plans/260908-0912-admin-portal-full-stack/plan.md` (local working notes; `plans/` is git-ignored).
 
+## 2026-09-16 — Review and comment moderation (Phase 8, F006)
+
+**Added**
+- 7 admin routes: `GET /api/v1/admin/reviews` (list, title search on the existing trigram index,
+  status + review-category filters, allowlisted sort), `GET .../:id` (review plus its full nested
+  comment tree), `PATCH .../:id/status`, `DELETE .../:id` (soft-delete), plus the review-scoped
+  `PATCH .../:id/comments/:commentId/visibility` and `DELETE .../:id/comments/:commentId`.
+- `GET /api/v1/admin/review-categories` — a read-only lookup added beyond the written spec (A7).
+  The spec called for a category filter but exposed no way to populate it; deliberately not CRUD,
+  since managing that taxonomy stays out of scope. `review_categories` is a different table from
+  Phase 3's *tour* categories.
+- Admin UI at `/admin/reviews`: list with status/category filters and row-level moderation, and a
+  detail screen carrying the review body and the nested thread. The sidebar "Reviews & Comments"
+  link, dead since Phase 3, now resolves.
+- `comment_thread_builder.go` — a pure, separately tested function that assembles the tree
+  iteratively: attach, promote orphans to root, prune deleted leaves bottom-up, redact the rest.
+
+**The substance of this feature — reading, not writing**
+- Every write is a single-column flip on one row; there is no transaction anywhere in the phase.
+  The complexity is entirely in assembling a thread that stays complete when parts of it have been
+  deleted out from under it.
+- `comments.parent_id`'s `ON DELETE CASCADE` fires only on a hard `DELETE`, which this app never
+  issues. So A2 fetches **all** comments regardless of `deleted_at` and redacts server-side: a
+  soft-deleted parent with live replies ships as `{id, parent_id, created_at, is_deleted}` carrying
+  no content and no author, with its replies intact and independently moderable beneath it
+  (BR-003). A deleted comment with no surviving descendant is omitted entirely, so the admin never
+  scrolls phantom placeholders.
+- `like_count`/`comment_count` are trigger-maintained; no repository, service or handler in this
+  feature has a write path to either (BR-002/BR-004), and the service tests assert the absence
+  rather than assuming it.
+
+**Fixed (found by live verification, invisible to the mock suite)**
+- `GET /api/v1/admin/reviews/:id` returned 500 on **every** call: the shared column list was
+  unqualified and interpolated into a three-table join where `reviews`, `users` and
+  `review_categories` each carry `id`/`created_at`/`updated_at`/`deleted_at`, so Postgres rejected
+  the statement with `column reference "id" is ambiguous` (SQLSTATE 42702). Severity: blocking —
+  the detail screen could never have loaded. Every mock-based test passed it.
+- The tree builder silently dropped comments caught in a `parent_id` cycle or self-reference: with
+  no member reachable from a root, the walk never entered the ring and those comments vanished from
+  the response — invisible and therefore unmoderatable, violating the builder's own invariant.
+  Rescued in `comment_thread_cycle_rescue.go`, with tests proven RED before the fix.
+- `ListCommentsForReview` had no `ORDER BY` tiebreaker, leaving sibling order non-deterministic
+  under equal timestamps; now `c.created_at ASC, c.id`, matching how the list query appends `r.id`.
+
+**Security**
+- A2 no longer ships `author_email`. It was joined, carried through the DTO and declared in the TS
+  types but rendered nowhere — dead PII on the wire. Author identity is name and avatar,
+  display-only, as the phase specifies.
+- Deleted comment content is redacted in the builder, server-side. The placeholder carries
+  structure only; content is never sent and hidden in the client.
+- Review bodies and comment text are user-authored and render as plain text in a high-privilege
+  admin session — no `dangerouslySetInnerHTML`, no markdown-to-HTML, no auto-linking.
+- Both comment writes are scoped `id = @comment_id AND review_id = @review_id`, so a comment cannot
+  be moderated through a review it does not belong to (404, nothing written).
+- `draft` is rejected as a moderation target by a two-value allowlist in the service, before any
+  query runs (422) — not left to the database's three-value CHECK.
+
+**Verification**
+- Backend gates green (`go build` / `go vet` / `go test ./...`; no `-race`, no C toolchain).
+  Frontend `pnpm lint` and `pnpm build` green.
+- Exercised live against local Postgres, and again through the Next rewrites proxy with the real
+  session cookie: hiding a comment moved `comment_count` 5→4 and unhiding restored it, by trigger
+  alone; a childless deleted comment vanished; a deleted parent returned as a content-free,
+  author-free placeholder with both replies intact; a soft-deleted review 404'd on A2, left A1, and
+  kept its comments in storage (BR-001). Six concurrent hides of one comment all returned 200 with
+  a final count matching a ground-truth recount.
+
+**Known limitations carried forward** — L1 no moderation audit trail (`activity_logs.action` has no
+value for publish/hide/delete and the schema is frozen; structured `slog` with actor and target ids
+is the trail). No restore path for a soft-deleted review or comment — an accepted default, stated
+plainly in the confirm dialogs; recovery is a manual `UPDATE ... SET deleted_at = NULL`. A1's title
+search rides the existing trigram index, but the comment-tree read is not paginated: a review with
+a very large thread returns it whole (acceptable at current volume, revisit in Phase 10).
+
 ## 2026-09-16 — Platform user management (Phase 7, F005)
 
 **Added**

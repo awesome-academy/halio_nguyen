@@ -25,3 +25,9 @@ export const bookingKeys = createListKeys("bookings");
 export const userKeys = createListKeys("users");
 export const reviewKeys = createListKeys("reviews");
 export const revenueKeys = createListKeys("revenue");
+
+// A7 — read-only seeded lookup, not a paginated list; kept separate from
+// reviewKeys so it never collides with reviewKeys.all's invalidation scope.
+export const reviewCategoryKeys = {
+  all: ["review-categories"] as const,
+};
