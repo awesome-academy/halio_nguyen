@@ -24,7 +24,17 @@ export const tourKeys = createListKeys("tours");
 export const bookingKeys = createListKeys("bookings");
 export const userKeys = createListKeys("users");
 export const reviewKeys = createListKeys("reviews");
-export const revenueKeys = createListKeys("revenue");
+
+/**
+ * F007 reads two different reports rather than one list + detail, so it gets
+ * its own factory. `all` is what the refresh button invalidates — one call
+ * covers both tables and the dashboard tile.
+ */
+export const revenueKeys = {
+  all: ["revenue"] as const,
+  daily: (query: object) => ["revenue", "daily", query] as const,
+  monthly: (query: object) => ["revenue", "monthly", query] as const,
+};
 
 // A7 — read-only seeded lookup, not a paginated list; kept separate from
 // reviewKeys so it never collides with reviewKeys.all's invalidation scope.

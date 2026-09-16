@@ -67,7 +67,11 @@ type UserBankAccount struct {
 	UserID            uuid.UUID  `json:"user_id"`
 	BankName          string     `json:"bank_name"`
 	BankCode          *string    `json:"bank_code,omitempty"`
-	AccountNumber     string     `json:"account_number"`
+	// Never serialized. Today the only thing keeping an account number out of
+	// a response is that no query populates this struct (booking A2 leaves
+	// Payment.UserBankAccount nil on purpose) — a guard that disappears the
+	// moment someone adds the join. The tag makes the struct itself safe.
+	AccountNumber     string     `json:"-"`
 	AccountHolderName string     `json:"account_holder_name"`
 	IsDefault         bool       `json:"is_default"`
 	CreatedAt         time.Time  `json:"created_at"`

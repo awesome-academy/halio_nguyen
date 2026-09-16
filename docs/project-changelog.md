@@ -3,6 +3,68 @@
 Running record of significant changes. Newest first. Plan of record:
 `plans/260908-0912-admin-portal-full-stack/plan.md` (local working notes; `plans/` is git-ignored).
 
+## 2026-09-16 — Revenue analytics, and plan closeout (Phases 9 & 10, F007)
+
+**Added**
+- 3 admin routes: `GET /api/v1/admin/revenue/daily` (per tour per day, paginated, allowlisted
+  sort, ISO date range defaulting to the current month), `GET .../monthly` (per category per
+  month, whole range in one response), and `POST .../refresh` (202 / 409).
+- Admin UI at `/admin/revenue`: daily and monthly tables over one shared date range, VND
+  formatting, a refresh trigger, and a last-refresh indicator. A shared
+  `components/admin/date-range-filter.tsx` drives both tables from the URL.
+- Both revenue reports and the dashboard tile read the materialized views directly; no aggregation
+  is recomputed in Go.
+
+**Changed**
+- `/admin/dashboard` and `/admin/revenue` no longer render mock data. Both pages were rewritten:
+  the dashboard is now **revenue-only** (decisions.md B1) — one tile with this month's total and
+  top category — and the fabricated KPI cards and "Recent Booking Requests" table are gone, not
+  rewired. The revenue page's sample row arrays and its non-functional "Export CSV" button are
+  removed (§7 out of scope). No mock, sample or hardcoded business data remains anywhere under
+  `apps/web/src/app/(admin)/`.
+
+**The substance of this feature — the refresh, not the reads**
+- `REFRESH MATERIALIZED VIEW CONCURRENTLY` cannot run inside a transaction, and pgx's default
+  extended protocol wraps every statement in an implicit one. The `CALL` is issued with
+  `pgx.QueryExecModeSimpleProtocol` on a dedicated connection; without that it fails silently in a
+  background goroutine with no HTTP response to fail into.
+- `pg_try_advisory_lock` is **session**-scoped. The acquire, the `CALL` and the unlock all run on
+  one `*pgxpool.Conn` owned by the goroutine, because taking the lock through the pool would leave
+  it held on whichever pooled connection happened to serve the call — wedging every later refresh
+  at 409 permanently. Verified live: `pg_locks` is empty afterwards and three consecutive triggers
+  all return 202.
+- The refresh runs on a `context.Background()`-derived context with a 15-minute ceiling, so it
+  survives the request that started it (a client aborted mid-refresh still saw the views update).
+  An outermost `recover()` contains a panic that would otherwise take the whole process down.
+- Last-refresh time lives in process memory only (L3): it is `null` after a restart and the UI
+  says "unknown" rather than inventing a time. No table was added; the schema stays frozen.
+
+**Verified (Phase 10)**
+- All 7 CI-equivalent gate commands exit 0, run before and after cleanup.
+- 50-call RBAC sweep across every admin route: 401 without a cookie, 403 with `role:"user"`, zero
+  failures. Exactly two ungated routes (`auth/login`, `auth/logout`), as designed.
+- Full walkthrough passed with database-level proofs: booking cancel restores schedule slots and
+  writes its `activity_logs` row; deleting a user with a live booking is blocked 409 and succeeds
+  204 once cancelled; the last-admin guard closes and re-opens; a deleted parent comment's replies
+  survive as moderable rows under a redacted tombstone.
+- Limitations L1–L7 each carry a written disposition. Nothing was handed back to an earlier phase.
+- Report: `plans/260908-0912-admin-portal-full-stack/reports/integration-walkthrough.md`.
+
+**Fixed**
+- `apps/api/internal/service/category_service_test.go` was 256 lines, over the project's 200-line
+  limit; split mechanically into two files with no test changed or removed.
+
+**Known limitations carried forward** — L1 no admin audit trail (`slog` is the record), L2 logout
+cannot revoke a token (1h TTL verified live as the mitigation), L3 no persisted last-refresh
+timestamp, L4 login throttle is per-replica, L5 repository SQL still untested in CI (7.4% package
+coverage; the manual `psql`/`curl` pass is the only integration evidence), L6 monthly revenue has
+no per-tour breakdown. Follow-ups recorded, none started: Postgres in CI, shared-store rate
+limiting, session revocation, a scheduler for `refresh_revenue_reports()` (nothing schedules it
+today — the views only move when an admin presses the button).
+
+**Local gate note** — `go test -race` could not run on the build host (no C toolchain); the suite
+was run without `-race`. The race detector remains covered by CI only.
+
 ## 2026-09-16 — Review and comment moderation (Phase 8, F006)
 
 **Added**

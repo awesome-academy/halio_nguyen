@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,5 +60,28 @@ func TestActivityActionConstants(t *testing.T) {
 		if key != val {
 			t.Errorf("expected action '%s', got '%s'", key, val)
 		}
+	}
+}
+
+// TestBankAccountNumberIsNeverSerialized locks in the Phase 10 hardening of
+// Phase 6's L1: today the only thing keeping an account number out of a
+// response is that no query populates UserBankAccount. If someone adds that
+// join, this tag is what stops the number reaching a client.
+func TestBankAccountNumberIsNeverSerialized(t *testing.T) {
+	b, err := json.Marshal(UserBankAccount{
+		AccountNumber:     "1234567890123456",
+		AccountHolderName: "Nguyen Van A",
+		BankName:          "Vietcombank",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(b), "1234567890123456") || strings.Contains(string(b), "account_number") {
+		t.Errorf("account number leaked into JSON: %s", b)
+	}
+	// The rest of the struct must still serialize — this is a redaction, not
+	// a blanket opt-out.
+	if !strings.Contains(string(b), "Vietcombank") {
+		t.Errorf("bank_name should still serialize: %s", b)
 	}
 }

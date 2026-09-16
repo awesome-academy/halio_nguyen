@@ -44,6 +44,13 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) Deps {
 	reviewModerationService := service.NewReviewModerationService(pool, reviewAdminRepo)
 	commentModerationService := service.NewCommentModerationService(pool, commentAdminRepo)
 
+	revenueRepo := repository.NewRevenueRepository()
+	// The runner needs the raw pool: it calls Acquire to own one session for
+	// the whole lock/refresh/unlock cycle, which repository.DB deliberately
+	// does not expose.
+	revenueRunner := service.NewRevenueRefreshRunner(service.PoolConnSource{Pool: pool})
+	revenueService := service.NewRevenueService(pool, revenueRepo, revenueRunner)
+
 	return Deps{
 		AuthHandler:   handler.NewAuthHandler(authService, cfg),
 		Categories:    handler.NewCategoryHandler(categoryService),
@@ -53,5 +60,6 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) Deps {
 		Bookings:      handler.NewBookingHandler(bookingService),
 		Users:         handler.NewUserAdminHandler(userAdminService),
 		Reviews:       handler.NewReviewAdminHandler(reviewModerationService, commentModerationService),
+		Revenue:       handler.NewRevenueHandler(revenueService),
 	}
 }
