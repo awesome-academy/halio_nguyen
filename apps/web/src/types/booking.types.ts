@@ -41,3 +41,37 @@ export interface Booking {
   created_at: string;
   updated_at: string;
 }
+
+// --- Admin portal DTOs (F004) -------------------------------------------
+// Mirrors apps/api/internal/domain.BookingListItem and the A2 detail shape.
+
+/** One row of GET /api/v1/admin/bookings (domain.BookingListItem).
+ * Deliberately narrower than Booking: FR-201 fixes the visible columns, so
+ * contact phone/email and special requests are detail-only. */
+export interface BookingListItem {
+  id: string;
+  booking_code: string;
+  user_id: string;
+  customer_name: string;
+  tour_id: string;
+  tour_title: string;
+  schedule_id: string;
+  departure_date: string;
+  num_participants: number;
+  total_price: number;
+  status: BookingStatus;
+  created_at: string;
+}
+
+/** GET /api/v1/admin/bookings/:id — user/tour/schedule always present;
+ * `payment` is absent whenever the booking has no payments row (BR/R5). */
+export interface BookingDetail extends Booking {
+  user: User;
+  tour: Tour;
+  schedule: TourSchedule;
+}
+
+/** PATCH /api/v1/admin/bookings/:id/cancel */
+export interface BookingCancelPayload {
+  cancellation_reason: string;
+}

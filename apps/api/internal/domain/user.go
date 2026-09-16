@@ -34,6 +34,19 @@ type User struct {
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }
 
+// UserDetail is A2's response shape (phase-07): the full profile plus its
+// two LIFETIME history counts. Deliberately embeds *User rather than being a
+// hand-built map — User.PasswordHash's json:"-" is what keeps the hash off
+// the wire, and that guarantee only holds if this type reuses User instead
+// of re-declaring its fields. The embedding is anonymous so encoding/json
+// promotes the profile fields to the top level: A2's body is one flat object
+// (FR-003's "full profile plus counts"), not a nested {"user": {...}} wrapper.
+type UserDetail struct {
+	*User
+	BookingCount int64 `json:"booking_count"`
+	ReviewCount  int64 `json:"review_count"`
+}
+
 // UserOAuthAccount represents a connected social authentication account.
 type UserOAuthAccount struct {
 	ID             uuid.UUID  `json:"id"`

@@ -39,3 +39,23 @@ type Booking struct {
 	UpdatedAt          time.Time     `json:"updated_at"`
 	DeletedAt          *time.Time    `json:"deleted_at,omitempty"`
 }
+
+// BookingListItem is A1's row shape. It is deliberately NOT domain.Booking
+// with its nested User/Tour/Schedule: FR-201 fixes the visible column set,
+// and a nested join would widen the list response with personal data the
+// list screen never renders (phase-06 Security Considerations). Contact
+// phone/email and special_requests stay on the detail response only.
+type BookingListItem struct {
+	ID              uuid.UUID `json:"id"`
+	BookingCode     string    `json:"booking_code"`
+	UserID          uuid.UUID `json:"user_id"`
+	CustomerName    string    `json:"customer_name"`
+	TourID          uuid.UUID `json:"tour_id"`
+	TourTitle       string    `json:"tour_title"`
+	ScheduleID      uuid.UUID `json:"schedule_id"`
+	DepartureDate   time.Time `json:"departure_date"`
+	NumParticipants int       `json:"num_participants"`
+	TotalPrice      float64   `json:"total_price"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+}

@@ -3,6 +3,164 @@
 Running record of significant changes. Newest first. Plan of record:
 `plans/260908-0912-admin-portal-full-stack/plan.md` (local working notes; `plans/` is git-ignored).
 
+## 2026-09-16 — Platform user management (Phase 7, F005)
+
+**Added**
+- 4 admin routes: `GET /api/v1/admin/users` (list, search over email + full name, role and
+  active-status filters, allowlisted sort), `GET .../:id` (profile + lifetime booking/review
+  counts), one combined `PATCH .../:id` for `is_active` and/or `role`, and `DELETE .../:id`
+  (soft-delete). No create-user endpoint by design — see D1 below.
+- Admin UI at `/admin/users`: list with row-level status toggle and delete, and a detail screen
+  carrying the profile card, the two history-count badges, the role dialog, the status toggle and
+  delete. Role change is detail-only (FR-005 / SCR002). The sidebar "User Management" link, dead
+  since Phase 3, now resolves.
+- `BookingRepository.CountActiveByUser` added as a third sibling of `CountActiveByTour` /
+  `CountActiveBySchedule` on Phase 4/6's file — no second repository, no fourth copy of the count.
+
+**Guards — the substance of this feature**
+- **BR-001 self-lockout.** Any self-target on `PATCH` or `DELETE` is `403`, without inspecting
+  which fields the body carries. Enforced server-side against the verified JWT subject (B2); the
+  hidden buttons in the UI are usability only and are not the control.
+- **BR-002 last-admin, refined.** The spec's literal pseudocode ("target is admin and active
+  admins <= 1 → 409") would block *reactivating* a deactivated sole admin and block a no-op
+  self-restatement, leaving no way out of a locked-out state. The implemented guard fires on the
+  *effective change* instead: only a mutation that would **remove** an active admin — demote,
+  deactivate, delete — trips it. Promotions, reactivations and no-ops succeed.
+- **BR-002 concurrency.** The guard runs inside the mutation's own transaction and takes the count
+  via `SELECT id ... WHERE role='admin' AND is_active AND deleted_at IS NULL FOR UPDATE`. A bare
+  `COUNT(*)` outside a transaction would let two simultaneous demotions of the last two admins
+  both pass and lock the portal out permanently, with no recovery path.
+- **BR-003 active-booking delete guard.** `bookings.user_id` is `ON DELETE RESTRICT`, which fires
+  only on a hard `DELETE` — this app soft-deletes with `UPDATE ... SET deleted_at`, so the FK is
+  inert and this service check is the *only* thing preventing an orphaned active booking. `409`
+  naming the blocking count.
+- Guard order is load-bearing and observable: BR-001 → BR-002 → BR-003. A sole admin deleting
+  themselves gets `403`, not `409`.
+
+**Decisions carried through**
+- **D1 — role-promotion IS the second-admin creation path.** `PATCH {"role":"admin"}` on a
+  non-self account is the sanctioned mechanism; no create-admin endpoint was added, and BR-002's
+  recovery path depends on this existing. The F005 spec's "out of scope" framing is superseded.
+- **L1 — no audit row for deactivate / demote / delete.** `activity_logs.action`'s CHECK enum has
+  no value for any of them and the schema is frozen. Structured `slog` carries actor id, target id
+  and changed-field flags — never email, phone or name.
+- **D6 — an unrecognised `sort_by` falls back silently** to `created_at DESC` through the shared
+  `ResolveSort`, rather than F005 §9's `400`. One sort path across the portal beats a per-feature
+  status code; both are safe, only the observable code differs. A malformed path UUID likewise
+  returns `400` through the shared `pathUUID` rather than the phase todo's `422`, for the same
+  one-parser reason. Both deviations are recorded in code comments.
+
+**Security**
+- `password_hash` never leaves the API. `json:"-"` on `domain.User` is the mechanism; `UserDetail`
+  embeds `*User` rather than re-declaring its fields or building a map, so the guarantee is
+  structural. Asserted against the raw marshalled bytes of every response, not a typed struct.
+- Privilege escalation is this feature's headline risk — `PATCH` can mint an admin. The actor id is
+  read only from the verified JWT subject, `role` is validated against the two domain constants
+  before it reaches SQL (the DB CHECK is the backstop, not the check), and a `role:"user"` token
+  gets `403` on every route.
+- `sort_by` / `sort_dir` go through the `ResolveSort` allowlist; `search`, `role`, `is_active` and
+  the id are all bound through `pgx.NamedArgs`, and the `ILIKE` pattern is built by parameter
+  binding, never concatenation.
+- **Soft-delete is not erasure.** A deleted user's row, bookings and reviews all persist by design
+  (history integrity) — this feature is not a GDPR-erasure mechanism and must not be described as
+  one.
+- **L2a, accepted:** a demotion or deactivation does not revoke the target's already-issued JWT.
+  The RBAC gate reads the `role` claim, never the live row, so a demoted admin keeps admin access
+  for up to the 1h token TTL.
+
+**Verified against a live database**
+Full walkthrough on real Postgres with the server up. BR-001: all three self-target mutations
+`403`, admin row unchanged. BR-002: all three mutations against the sole active admin `409`, row
+unchanged; reactivating a deactivated sole admin and promoting a user both `200` (the R1
+refinement); after promoting a second admin the previously-`409` demotion returns `200` (D1's
+recovery path). **BR-002 concurrency:** two simultaneous demotions of the last two admins returned
+exactly `{200, 409}` with exactly one active admin left — the `FOR UPDATE` serialization proven,
+not asserted. BR-003: deleting a user with one `pending` booking gave `409` naming the count with
+`deleted_at` still NULL; after flipping that booking to `completed`, `204` with the booking row
+intact, the user gone from the list and `404` on detail. Also confirmed: no `password_hash` in any
+raw response body, `401` on every route without a cookie, silent sort fallback, case-insensitive
+partial search across both email and full name, and `422` / `422` / `400` / `404` for empty patch /
+invalid role / malformed uuid / unknown id. All test data was removed and the database restored to
+its pre-test state afterwards.
+
+**Known limits**
+- `guardLastAdmin` row-locks the entire active-admin set on every mutation, not only when the
+  target is an admin — as the plan specifies. Two admins editing two unrelated regular users
+  serialize against each other. A non-issue at single-digit admin scale; noted for Phase 10.
+- No optimistic locking on user rows (RISK-002, accepted for v1) — concurrent edits are
+  last-write-wins.
+
+## 2026-09-16 — Booking request management (Phase 6, F004)
+
+**Added**
+- 5 admin routes: `GET /api/v1/admin/bookings` (list), `GET .../:id` (detail),
+  and three guarded transitions `PATCH .../:id/{confirm,cancel,complete}`. Bookings are never
+  created or edited here — the customer site owns creation, and nothing in this feature writes
+  the `payments` table (refunds are out of scope).
+- SM-001 enforced by guarded `UPDATE ... WHERE status = ANY(expected) ... RETURNING`, not by a
+  pre-read. A zero-row result *is* the conflict signal; 404 vs 409 is resolved by a follow-up
+  existence read that runs only after the guard already rejected the write, so it cannot
+  reintroduce the race.
+- Cancel is the one multi-table write: booking flip + `tour_schedules.available_slots` restore
+  (BR-005) + the single `activity_logs('cancel_tour')` row this portal may write outside
+  login/logout, all in one transaction. A failure in any of the three rolls back all three.
+- Admin UI at `/admin/bookings`: list (status/tour/schedule/created-date filters, search over
+  booking code + contact name + email, allowlisted sort) and detail (tour/departure panel,
+  customer panel, read-only payment card, SM-001-driven actions).
+- Shared `BookingStatusBadge` lifted out of the dashboard mock into `components/admin/`, so it
+  survives that mock's removal in Phase 9. Adds the `cancelled` variant the mock lacked.
+
+**Decisions carried through**
+- **B3 — confirm warns but does not block on an incomplete payment.** The server deliberately
+  performs no payment check: cash and offline `bank_transfer` settlement are real, so a 409 here
+  would be a defect, not extra safety. The warning is client-side only, and the confirm button
+  stays enabled. A service test asserts the unpaid confirm *succeeds*, to stop a future
+  "hardening" from silently breaking offline settlement.
+- **L1 — confirm and complete are not audit-logged.** `activity_logs.action` has a CHECK enum
+  with no value for either, and the schema is frozen. Structured `slog` (ids only, never contact
+  details) carries the trail instead; the gap is Phase 10's to revisit.
+- List responses are fixed to FR-201's columns — `contact_phone`, `contact_email` and
+  `special_requests` are detail-only and never widened into the list.
+
+**Fixed**
+- `GET /bookings/:id` returned 500 for any booking with no `payments` row
+  (`cannot scan NULL into *float64`). `payments` declares `amount`/`payment_method`/`status`/
+  `created_at`/`updated_at` NOT NULL, but a LEFT JOIN that matches nothing yields NULL in *every*
+  column. Now scanned through a `nullablePayment` struct whose fields are all pointers, with a
+  pure `toDomain()`; regression-guarded in CI by `booking_payment_scan_test.go` (no Postgres
+  needed). Severity: high — it broke the detail page for every unpaid booking, which is the
+  common case for cash/offline settlement.
+
+**Security**
+- `user_bank_accounts` is never joined in any booking response. `domain.Payment.UserBankAccount`
+  is a nested pointer whose `AccountNumber` carries no `json:"-"` tag, so a populated pointer
+  would serialise the full account number verbatim — that nil is the only thing preventing the
+  leak. Asserted against the raw response bytes for both A1 and A2.
+- The cancellation reason is length-capped server-side (1000 chars) and rendered as text, never
+  HTML.
+- Hidden/disabled action buttons mirror SM-001 for usability only; the guarded UPDATE is the
+  control, verified by calling each transition out of order.
+
+**Verified against a live database**
+Docker/Postgres turned out to be available on this machine (the earlier "no Docker" note was
+stale), so Phase 6 ran the live steps Phases 3–5 had to skip. On real Postgres: SC-001–SC-004 all
+pass; cancel moved slots 3 → 5 for a 2-passenger booking with exactly one audit row attributed to
+the acting admin; an empty reason returned 422 with zero writes; `date_from > date_to` returned
+422 before the query ran; and all 5 routes returned 401 without a cookie.
+
+Concurrency was proven, not asserted: two simultaneous cancels returned `{200, 409}` across 5 runs
+with slots restored exactly once each time (R4 closed), and two simultaneous confirms returned
+`{200, 409}` across 3 runs (R3 closed). Simultaneous confirm+cancel returned `{200, 200}` — the
+plan predicted `{200, 409}`, but that prediction was wrong rather than the code: cancel's guard
+legitimately accepts `confirmed` as well as `pending`, so confirm-then-cancel is a valid
+serialisation and the at-most-once slot restore still held.
+
+**Known limitations**
+- `go test -race` still cannot run here (no C toolchain); plain `go test ./...` is the gate.
+- Repository SQL has no automated integration test — the live verification above was manual and
+  its fixtures were removed afterwards. The scan-assembly logic is unit-tested in CI, but the
+  queries themselves are only covered by that manual pass.
+
 ## 2026-09-14 — Tour package backend (Phase 4, F003)
 
 **Added**

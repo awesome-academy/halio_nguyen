@@ -53,6 +53,27 @@ func (tourScheduleRepository) LockForUpdate(ctx context.Context, db DB, tourID, 
 	return nil
 }
 
+// RestoreSlots is phase-06's BR-005 write: a cancelled booking hands its
+// seats back to the schedule. The addition happens in SQL rather than
+// read-modify-write in Go so two concurrent cancels on the same schedule
+// cannot lose one another's increment. A missing schedule is a hard error —
+// silently dropping it would leak the seats permanently, and no other admin
+// path writes available_slots.
+func (tourScheduleRepository) RestoreSlots(ctx context.Context, db DB, scheduleID uuid.UUID, n int) error {
+	tag, err := db.Exec(ctx,
+		`UPDATE tour_schedules SET available_slots = available_slots + @n, updated_at = NOW()
+		 WHERE id = @id AND deleted_at IS NULL`,
+		pgx.NamedArgs{"id": scheduleID, "n": n},
+	)
+	if err != nil {
+		return fmt.Errorf("repository: restoring schedule slots: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrTourScheduleNotFound
+	}
+	return nil
+}
+
 // ScheduleDateConflict builds the 409 for a duplicate departure_date (BR-004).
 func ScheduleDateConflict(field string) *apperror.Error {
 	msg := "A schedule already exists for this departure date."

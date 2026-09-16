@@ -38,6 +38,13 @@ type TourScheduleRepository interface {
 	// LockForUpdate mirrors TourRepository.LockForUpdate for BR-012's A13
 	// guard (implemented in tour_schedule_repository_tx.go).
 	LockForUpdate(ctx context.Context, db DB, tourID, id uuid.UUID) error
+	// RestoreSlots adds n back to available_slots (phase-06 BR-005). Unlike
+	// every other method here it is not scoped by tour_id: its caller
+	// already holds the schedule_id straight off the cancelled booking row,
+	// which the FK guarantees is real. Implemented in
+	// tour_schedule_repository_tx.go; it takes the shared DB so it enlists
+	// in the cancel transaction.
+	RestoreSlots(ctx context.Context, db DB, scheduleID uuid.UUID, n int) error
 }
 
 type tourScheduleRepository struct{}

@@ -34,6 +34,10 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) Deps {
 	tourService := service.NewTourService(pool, tourRepo, categoryRepo, tourImageRepo, tourScheduleRepo, bookingRepo)
 	tourImageService := service.NewTourImageService(pool, tourRepo, tourImageRepo)
 	tourScheduleService := service.NewTourScheduleService(pool, tourRepo, tourScheduleRepo, bookingRepo)
+	bookingService := service.NewBookingService(pool, bookingRepo, tourScheduleRepo, activityRepo)
+
+	userAdminRepo := repository.NewUserAdminRepository()
+	userAdminService := service.NewUserAdminService(pool, userAdminRepo, bookingRepo)
 
 	return Deps{
 		AuthHandler:   handler.NewAuthHandler(authService, cfg),
@@ -41,5 +45,7 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) Deps {
 		Tours:         handler.NewTourHandler(tourService),
 		TourImages:    handler.NewTourImageHandler(tourImageService),
 		TourSchedules: handler.NewTourScheduleHandler(tourScheduleService),
+		Bookings:      handler.NewBookingHandler(bookingService),
+		Users:         handler.NewUserAdminHandler(userAdminService),
 	}
 }
