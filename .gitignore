@@ -38,3 +38,9 @@ skills-lock.json
 
 # Planning artifacts (local working notes, not part of the shipped repo)
 plans/
+
+# Playwright E2E (local artifacts + live session state)
+apps/web/playwright/.auth/
+apps/web/e2e-report/
+apps/web/test-results/
+apps/web/.env.e2e

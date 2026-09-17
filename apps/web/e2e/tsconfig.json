@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "jsx": "preserve"
+  },
+  "include": ["**/*.ts", "../playwright.config.ts"],
+  // Override, not merge with, the parent's "exclude" — the parent excludes
+  // this whole e2e/ tree (so it stays out of `next build`/`next lint`), and
+  // TypeScript's `extends` re-resolves inherited relative paths against
+  // *this* file's directory, which would otherwise exclude every file this
+  // project's own "include" is trying to bring in.
+  "exclude": ["../node_modules"]
+}

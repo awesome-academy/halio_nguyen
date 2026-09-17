@@ -1,4 +1,4 @@
-.PHONY: up down db-shell migrate-up migrate-down migrate-seed run-api dev-web build-web test-api lint-web docker-api docker-web
+.PHONY: up down db-shell migrate-up migrate-down migrate-seed run-api dev-web build-web test-api lint-web docker-api docker-web test-e2e e2e-report e2e-kill-web
 
 # Start Postgres and pgAdmin containers
 up:
@@ -51,3 +51,19 @@ docker-api:
 # Build frontend Docker container image locally
 docker-web:
 	docker build -t sun-booking-web:latest -f apps/web/Dockerfile apps/web
+
+# Run the Playwright admin E2E suite (needs `make up` + `make run-api` first)
+test-e2e:
+	cd apps/web && pnpm test:e2e
+
+# Open the last HTML report
+e2e-report:
+	cd apps/web && pnpm test:e2e:report
+
+# Kill whatever process is bound to :3000 (a stale `next dev` most often).
+# Resolves the PID from the bound port rather than matching "next" in the
+# command line, so it never reaches into an unrelated node.exe process
+# (e.g. Nextcloud, or another project's dev server) that happens to be
+# running at the same time.
+e2e-kill-web:
+	powershell -Command "Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $$_ -Force -ErrorAction SilentlyContinue }"
