@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import { CategoriesPage, type CategoryInput } from "../pages/categories-page";
 import { uniqueName } from "../support/unique-name";
 import { safeTeardown } from "../support/safe-teardown";
+import { CATEGORY_WRITE_LOCK, withExclusiveLock } from "../support/exclusive-lock";
 
 /**
  * Self-cleaning category factory (D2: seed-only, no DB reset — the suite
@@ -20,26 +21,30 @@ export class CategoryFactory {
 
   async create(overrides: Partial<CategoryInput> = {}): Promise<string> {
     const name = overrides.name ?? uniqueName("Cat");
-    const categories = new CategoriesPage(this.page);
-    await categories.goto();
-    await categories.openCreate();
-    await categories.fillForm({ ...overrides, name });
-    await categories.save();
-    await expect(this.page.getByRole("dialog")).toHaveCount(0);
-    await categories.table.expectRowVisible(name);
-    this.created.push(name);
-    return name;
+    return withExclusiveLock(CATEGORY_WRITE_LOCK, async () => {
+      const categories = new CategoriesPage(this.page);
+      await categories.goto();
+      await categories.openCreate();
+      await categories.fillForm({ ...overrides, name });
+      await categories.save();
+      await expect(this.page.getByRole("dialog")).toHaveCount(0);
+      await categories.table.expectRowVisible(name);
+      this.created.push(name);
+      return name;
+    });
   }
 
   async cleanup(): Promise<void> {
-    for (const name of [...this.created].reverse()) {
-      await safeTeardown(`category ${name}`, async () => {
-        const categories = new CategoriesPage(this.page);
-        await categories.goto(`?search=${encodeURIComponent(name)}`);
-        await categories.deleteButton(name).click();
-        await categories.confirm.confirm("Delete");
-        await categories.table.expectRowGone(name);
-      });
-    }
+    await withExclusiveLock(CATEGORY_WRITE_LOCK, async () => {
+      for (const name of [...this.created].reverse()) {
+        await safeTeardown(`category ${name}`, async () => {
+          const categories = new CategoriesPage(this.page);
+          await categories.goto(`?search=${encodeURIComponent(name)}`);
+          await categories.deleteButton(name).click();
+          await categories.confirm.confirm("Delete");
+          await categories.table.expectRowGone(name);
+        });
+      }
+    });
   }
 }

@@ -62,6 +62,21 @@ export class TourFormPage {
     return this.page.getByRole("button", { name: TOUR_IMAGE_FIELDS.addImage });
   }
 
+  /**
+   * `tour-image-row.tsx`'s URL input has no label/aria-label, only
+   * `placeholder="https://…"` — and `tour-form-pricing-section.tsx`'s
+   * Thumbnail URL field shares that exact placeholder, so an unscoped
+   * `getByPlaceholder` is ambiguous. Scoped to the "Gallery" section (the
+   * images editor's own heading) so it only ever matches image rows.
+   */
+  imageUrlInput(n: number): Locator {
+    return this.page
+      .getByRole("heading", { level: 2, name: "Gallery" })
+      .locator("..")
+      .getByPlaceholder("https://…")
+      .nth(n - 1);
+  }
+
   saveImage(n: number): Locator {
     return this.page.getByRole("button", { name: TOUR_IMAGE_FIELDS.saveImage(n) });
   }

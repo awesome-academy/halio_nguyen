@@ -1,17 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import { TourFormPage, type TourBasicInput } from "../pages/tour-form-page";
-import { AdminPage } from "../pages/admin-page";
 import { uniqueName } from "../support/unique-name";
 import { safeTeardown } from "../support/safe-teardown";
 
 /** A seeded, always-present category — used so `tourFactory` never depends on `categoryFactory`. */
 const DEFAULT_CATEGORY = "Island & Coastal Tours";
-
-class ToursListPage extends AdminPage {
-  constructor(page: Page) {
-    super(page, "/admin/tours", "Tour Packages");
-  }
-}
 
 export type TourInput = Partial<TourBasicInput> & { title?: string };
 
@@ -20,15 +13,23 @@ export type TourInput = Partial<TourBasicInput> & { title?: string };
  * `tourCreateSchema` accepts — images and schedules are optional arrays, so
  * the form's Basic + Pricing sections alone are enough.
  *
- * Deletion goes through the tours row action menu: `Actions for {title}` →
- * `Delete` → the shared alertdialog → `Delete`. New tours are created in
- * `draft` status (`tour_rules.go`), and `delete` is only offered in that
- * status — a factory-created tour that gets published/archived by the test
- * body will fail its own cleanup, which `safeTeardown` turns into a logged
- * orphan rather than a masked test failure.
+ * Cleanup deletes via the admin API rather than the row action menu, because
+ * the UI can paint itself into a corner this factory must still clean up:
+ * `allowedTourActions` (tour-status-rules.ts) offers `delete` ONLY for
+ * `draft`, and the status machine has no transition back to it
+ * (draft→published→archived→reactivate→published). So any tour a test
+ * publishes is permanently undeletable through the UI, and the old
+ * menu-driven cleanup leaked one orphan per lifecycle run — silently, since
+ * `safeTeardown` swallows teardown errors so they cannot mask a real failure.
+ * `DELETE /tours/:id` itself has no status check (tour_service.go:152 blocks
+ * only on active bookings), so the API path cleans up every state.
+ *
+ * This is teardown, not an assertion: deleting a tour THROUGH the UI still
+ * has its own explicit test in `tours-crud.spec.ts`. The request goes through
+ * the same origin, proxy and session cookie the UI uses.
  */
 export class TourFactory {
-  private readonly created: string[] = [];
+  private readonly created: { id: string; title: string }[] = [];
 
   constructor(private readonly page: Page) {}
 
@@ -48,19 +49,23 @@ export class TourFactory {
     });
     await form.submitCreate.click();
     await expect(this.page).toHaveURL(/\/admin\/tours\/[0-9a-f-]{36}$/);
-    this.created.push(title);
+    // The create redirect carries the new id — cheaper and more reliable than
+    // searching the list for it at teardown time.
+    const id = new URL(this.page.url()).pathname.split("/").pop()!;
+    this.created.push({ id, title });
     return title;
   }
 
   async cleanup(): Promise<void> {
-    for (const title of [...this.created].reverse()) {
+    for (const { id, title } of [...this.created].reverse()) {
       await safeTeardown(`tour ${title}`, async () => {
-        const tours = new ToursListPage(this.page);
-        await tours.goto(`?search=${encodeURIComponent(title)}`);
-        await tours.table.rowActions(`Actions for ${title}`).click();
-        await tours.table.menuItem("Delete").click();
-        await tours.confirm.confirm("Delete");
-        await tours.table.expectRowGone(title);
+        const response = await this.page.request.delete(`/api/v1/admin/tours/${id}`);
+        // 404 means something already removed it — equally clean. Anything
+        // else is a real leak and must be loud, because `safeTeardown` will
+        // otherwise reduce it to a log line nobody reads.
+        if (!response.ok() && response.status() !== 404) {
+          throw new Error(`[e2e] could not delete tour ${title} (${id}): HTTP ${response.status()} ${await response.text()}`);
+        }
       });
     }
   }

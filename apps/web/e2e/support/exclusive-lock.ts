@@ -13,6 +13,40 @@ interface LockOwner {
   at: number;
 }
 
+/**
+ * Every write to the `categories` table must take this one lock.
+ *
+ * The reorder write path recomputes ranks as a contiguous `0..n-1` set
+ * (`category_rules.go`), so ANY concurrent category create/delete — from a
+ * different spec file on the other worker — shifts the ranks the sort-order
+ * test just read, and its next click lands on the wrong absolute slot.
+ * Serialising all category writes against each other removes that
+ * interference. See the reorder-staleness note in the plan's Execution Log.
+ */
+export const CATEGORY_WRITE_LOCK = "categories-write";
+
+/**
+ * Every mutation against the `users` table (role change, active toggle) must
+ * take this lock — record AND restore included, not just the click.
+ *
+ * There are exactly two seeded users and no admin-UI path to create a third
+ * (phase-06-users.md). Without this lock, a second concurrent suite run can
+ * read `tourist@sunbooking.com`'s row mid-mutation from a different worker
+ * process, record that transient state as its own "original", and then
+ * "restore" the account to it — permanently leaving a stray admin or a
+ * deactivated account behind once both runs report green.
+ */
+export const USER_WRITE_LOCK = "users-write";
+
+/**
+ * Locks this process already holds, so a nested acquire is a no-op instead of
+ * a self-deadlock: the sort-order spec holds the lock across its whole body
+ * and calls the category factory — which takes the same lock — inside it.
+ * Per-process is the correct grain; each Playwright worker is its own process
+ * and runs its tests sequentially.
+ */
+const heldInThisProcess = new Set<string>();
+
 function lockDir(name: string): string {
   return join(LOCK_ROOT, name);
 }
@@ -57,6 +91,10 @@ function reclaimIfStale(name: string): void {
  * than silently racing another run.
  */
 export async function withExclusiveLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  // Reentrant: this process already owns it, so just run the body. Releasing
+  // here would hand the lock away while the outer holder is still mid-write.
+  if (heldInThisProcess.has(name)) return await fn();
+
   mkdirSync(LOCK_ROOT, { recursive: true });
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
 
@@ -69,9 +107,11 @@ export async function withExclusiveLock<T>(name: string, fn: () => Promise<T>): 
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
 
+  heldInThisProcess.add(name);
   try {
     return await fn();
   } finally {
+    heldInThisProcess.delete(name);
     rmSync(lockDir(name), { recursive: true, force: true });
   }
 }

@@ -4,6 +4,7 @@ import { AdminShellPage } from "../pages/admin-shell";
 import { DataTableComponent } from "../components/data-table";
 import { CategoryFactory } from "./category-factory";
 import { TourFactory } from "./tour-factory";
+import { SeededUserGuard } from "./seeded-user";
 
 interface AdminFixtures {
   /** Fails fast, once per test, on the `admin` project only (mandatory override #6). */
@@ -12,6 +13,8 @@ interface AdminFixtures {
   table: DataTableComponent;
   categoryFactory: CategoryFactory;
   tourFactory: TourFactory;
+  /** Records `tourist@sunbooking.com`'s role/active state and restores it in `finally` (phase-06). */
+  seededUser: SeededUserGuard;
 }
 
 /**
@@ -62,6 +65,19 @@ export const test = base.extend<AdminFixtures>({
       await use(factory);
     } finally {
       await factory.cleanup();
+    }
+  },
+
+  // try/finally, NOT afterEach — restore must survive assertion failures AND
+  // test timeouts (decisions.md §J7). `record()` runs before the test body
+  // touches anything so it captures the true starting state.
+  seededUser: async ({ page }, use) => {
+    const guard = new SeededUserGuard(page);
+    await guard.record();
+    try {
+      await use(guard);
+    } finally {
+      await guard.restore();
     }
   },
 });
